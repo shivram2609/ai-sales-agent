@@ -1,0 +1,42 @@
+<?php
+
+use App\Models\DiscoveryCampaign;
+use App\Models\DiscoveryResult;
+use App\Models\OutreachDraft;
+use App\Models\Prospect;
+use App\Services\Analyzer\ProspectAnalyzerService;
+use App\Services\Crawler\WebsiteCrawlerService;
+use App\Services\Discovery\DiscoveryService;
+use App\Services\Drafts\DraftGeneratorService;
+use App\Services\Drafts\DraftQualityService;
+use App\Services\Knowledge\KnowledgeAssetSeederService;
+use App\Services\ProofMatcher\ProofMatcherService;
+use App\Services\Prospects\ProspectService;
+use App\Services\Review\ReviewQueueService;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
+
+Route::get('/health', fn() => ['status' => 'ok', 'database' => 'connected']);
+Route::get('/prospects', fn() => Prospect::with(['pages','analyses','drafts.qualityChecks','reviewActions','agentLogs'])->latest()->get());
+Route::post('/prospects', fn(Request $r, ProspectService $s) => $s->create($r->all()));
+Route::get('/prospects/{prospect}', fn(Prospect $prospect) => $prospect->load(['pages','analyses','drafts.qualityChecks','reviewActions','agentLogs']));
+Route::post('/crawler/prospects/{prospect}/homepage', fn(Prospect $prospect, WebsiteCrawlerService $s) => ['message' => 'Homepage crawled successfully', 'page' => $s->crawlHomepage($prospect)]);
+Route::post('/analyzer/prospects/{prospect}/run', fn(Prospect $prospect, ProspectAnalyzerService $s) => ['message' => 'Prospect analyzed successfully', 'analysis' => $s->analyze($prospect)]);
+Route::post('/knowledge-assets/seed-defaults', fn(KnowledgeAssetSeederService $s) => ['message' => 'Default Zestminds knowledge assets seeded successfully'] + $s->seedDefaults());
+Route::get('/knowledge-assets', fn() => \App\Models\KnowledgeAsset::where('is_active', true)->get());
+Route::post('/proof-matcher/prospects/{prospect}/run', fn(Prospect $prospect, ProofMatcherService $s) => ['message' => 'Proof matched successfully'] + $s->match($prospect));
+Route::post('/draft-generator/prospects/{prospect}/run', fn(Prospect $prospect, DraftGeneratorService $s) => tap($s->generate($prospect), fn($d) => null));
+Route::post('/draft-quality/drafts/{draft}/run', fn(OutreachDraft $draft, DraftQualityService $s) => ['message' => 'Draft quality check completed', 'quality_check' => $s->check($draft)]);
+Route::get('/review-queue', fn(ReviewQueueService $s) => ['message' => 'Review queue loaded successfully', 'prospects' => $s->queue()]);
+Route::post('/review-queue/prospects/{prospect}/approve', fn(Request $r, Prospect $prospect, ReviewQueueService $s) => tap(['message' => 'Prospect approved for outreach'], fn() => $s->approve($prospect, $r->input('notes'))));
+Route::post('/review-queue/prospects/{prospect}/reject', fn(Request $r, Prospect $prospect, ReviewQueueService $s) => tap(['message' => 'Prospect rejected'], fn() => $s->reject($prospect, $r->input('notes'))));
+Route::post('/review-queue/prospects/{prospect}/mark-not-fit', fn(Request $r, Prospect $prospect, ReviewQueueService $s) => tap(['message' => 'Prospect marked as not fit'], fn() => $s->markNotFit($prospect, $r->input('notes'))));
+Route::get('/outreach-drafts', fn() => OutreachDraft::with('prospect','qualityChecks')->latest()->get());
+Route::get('/outreach-drafts/{draft}', fn(OutreachDraft $draft) => $draft->load(['prospect.analyses','qualityChecks']));
+Route::post('/discovery/campaigns', fn(Request $r, DiscoveryService $s) => $s->createCampaign($r->all()));
+Route::get('/discovery/campaigns', fn() => DiscoveryCampaign::withCount('results')->latest()->get());
+Route::get('/discovery/campaigns/{campaign}', fn(DiscoveryCampaign $campaign) => $campaign->load(['results','logs']));
+Route::post('/discovery/campaigns/{campaign}/run', fn(DiscoveryCampaign $campaign, DiscoveryService $s) => ['message' => 'Discovery campaign completed successfully'] + $s->run($campaign));
+Route::get('/discovery/campaigns/{campaign}/results', fn(DiscoveryCampaign $campaign) => $campaign->results()->orderByDesc('relevance_score')->get());
+Route::post('/discovery/results/{result}/convert-to-prospect', fn(DiscoveryResult $result, DiscoveryService $s) => ['message' => 'Discovery result converted to prospect successfully', 'prospect' => $s->convertToProspect($result)]);
+Route::post('/discovery/campaigns/{campaign}/convert-strong', fn(DiscoveryCampaign $campaign, DiscoveryService $s) => ['message' => 'Strong/possible candidates converted', 'count' => $s->convertStrongCandidates($campaign)]);
