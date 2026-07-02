@@ -5,14 +5,19 @@ namespace App\Services\Drafts;
 use App\Models\AgentLog;
 use App\Models\OutreachDraft;
 use App\Models\Prospect;
+use App\Models\ProspectContact;
+use App\Services\AI\DraftTextSanitizerService;
 use App\Services\ProofMatcher\ProofMatcherService;
 use RuntimeException;
 
 class DraftGeneratorService
 {
-    public function __construct(private ProofMatcherService $proofMatcherService) {}
+    public function __construct(
+        private ProofMatcherService $proofMatcherService,
+        private DraftTextSanitizerService $sanitizer
+    ) {}
 
-    public function generate(Prospect $prospect): OutreachDraft
+    public function generate(Prospect $prospect, ?ProspectContact $contact = null): OutreachDraft
     {
         $analysis = $prospect->analyses()->latest()->first();
         if (!$analysis) throw new RuntimeException('No analysis found. Please run analyzer first.');
@@ -22,7 +27,7 @@ class DraftGeneratorService
         if (!$proofs) throw new RuntimeException('No proof links matched. Please seed knowledge assets or check analysis.');
 
         $companyName = $prospect->company_name ?: $prospect->domain ?: 'there';
-        $greeting = str_contains($companyName, '.') ? 'there' : $companyName;
+        $greeting = $contact?->name ? explode(' ', trim($contact->name))[0] : (str_contains($companyName, '.') ? 'there' : $companyName);
         $companyType = strtolower($analysis->company_type ?: 'agency');
         $label = $companyType;
         $primaryProof = $proofs[0];
@@ -44,16 +49,17 @@ class DraftGeneratorService
 
         $draft = OutreachDraft::create([
             'prospect_id' => $prospect->id,
+            'prospect_contact_id' => $contact?->id,
             'channel' => 'email_linkedin',
-            'subject' => $subject,
-            'body' => implode("\n", array_values(array_filter($bodyLines, fn($line) => $line !== null))),
-            'linkedin_connection_note' => "Hi, I noticed your team works around {$label}. I run Zestminds, where we support agencies with development, APIs, SaaS, CRM, Shopify, and AI automation work. Thought it may be useful to connect.",
-            'linkedin_followup' => 'Thanks for connecting. Quick context: we help agencies as a technical execution partner when they need reliable dev support for client projects, especially backend, SaaS, integrations, CRM, and AI automation. Happy to share a few examples if useful.',
-            'follow_up_1' => "Hi {$greeting},\n\nJust following up on my earlier note.\n\nThe reason I reached out is simple: many {$label} teams get client requests that go beyond design, marketing, or platform setup — things like backend systems, APIs, dashboards, CRM integrations, or AI automation.\n\nThat is where Zestminds can quietly support as an execution partner.\n\nWorth a quick conversation?\n\nBest,\nShivam",
-            'follow_up_2' => "Hi {$greeting},\n\nLast note from my side.\n\nIf you ever need extra technical hands for client projects — SaaS, custom web apps, backend/API work, Shopify, CRM, or AI automation — Zestminds can support either as a white-label or partner team.\n\nNo pressure at all. Should I keep you in mind for future collaboration, or is this not relevant right now?\n\nBest,\nShivam",
+            'subject' => $this->sanitizer->sanitizeString($subject),
+            'body' => $this->sanitizer->sanitizeString(implode("\n", array_values(array_filter($bodyLines, fn($line) => $line !== null)))),
+            'linkedin_connection_note' => $this->sanitizer->sanitizeString("Hi, I noticed your team works around {$label}. I run Zestminds, where we support agencies with development, APIs, SaaS, CRM, Shopify, and AI automation work. Thought it may be useful to connect."),
+            'linkedin_followup' => $this->sanitizer->sanitizeString('Thanks for connecting. Quick context: we help agencies as a technical execution partner when they need reliable dev support for client projects, especially backend, SaaS, integrations, CRM, and AI automation. Happy to share a few examples if useful.'),
+            'follow_up_1' => $this->sanitizer->sanitizeString("Hi {$greeting},\n\nJust following up on my earlier note.\n\nThe reason I reached out is simple: many {$label} teams get client requests that go beyond design, marketing, or platform setup - things like backend systems, APIs, dashboards, CRM integrations, or AI automation.\n\nThat is where Zestminds can quietly support as an execution partner.\n\nWorth a quick conversation?\n\nBest,\nShivam"),
+            'follow_up_2' => $this->sanitizer->sanitizeString("Hi {$greeting},\n\nLast note from my side.\n\nIf you ever need extra technical hands for client projects - SaaS, custom web apps, backend/API work, Shopify, CRM, or AI automation - Zestminds can support either as a white-label or partner team.\n\nNo pressure at all. Should I keep you in mind for future collaboration, or is this not relevant right now?\n\nBest,\nShivam"),
             'proof_links_used' => $proofs,
-            'personalization_notes' => ["Detected company type: {$analysis->company_type}", 'Used primary proof: '.$primaryProof['title']],
-            'risk_flags' => ['Rule-based draft only. Human review required before sending.', 'Verify company fit before outreach.'],
+            'personalization_notes' => $this->sanitizer->sanitizeArray(["Detected company type: {$analysis->company_type}", 'Used primary proof: '.$primaryProof['title']]),
+            'risk_flags' => $this->sanitizer->sanitizeArray(['Rule-based draft only. Human review required before sending.', 'Verify company fit before outreach.']),
             'status' => 'drafted',
         ]);
 

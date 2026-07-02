@@ -125,6 +125,8 @@
                                 </a>
                             </th>
 
+                            <th>Verdict</th>
+
                             <th>
                                 <a href="{{ $sortUrl('created_at') }}" class="table-sort-link">
                                     Created
@@ -166,6 +168,16 @@
                                     <span class="status-badge {{ $draft->status }}">
                                         {{ str_replace('_', ' ', $draft->status ?: 'draft') }}
                                     </span>
+                                </td>
+
+                                <td>
+                                    @if($draft->ai_verdict)
+                                        <span class="status-badge {{ $draft->ai_verdict }}">
+                                            {{ str_replace('_', ' ', $draft->ai_verdict) }}
+                                        </span>
+                                    @else
+                                        <span class="text-muted small">Not checked</span>
+                                    @endif
                                 </td>
 
                                 <td>

@@ -44,6 +44,7 @@ class DraftQualityService
 
             $draft->update([
                 'status' => 'ai_quality_checked',
+                'ai_verdict' => $json['verdict'] ?? null,
                 'ai_quality_score' => $json['scores']['overall_quality'] ?? null,
                 'ai_personalization_score' => $json['scores']['personalization'] ?? null,
                 'ai_relevance_score' => $json['scores']['relevance'] ?? null,

@@ -84,6 +84,50 @@ class ControlledSendingService
         ]);
     }
 
+    public function queueFollowUp(CampaignMember $member, string $emailType, $scheduledAt): ?OutboundEmailJob
+    {
+        $member->loadMissing(['campaign', 'prospect', 'contact', 'draft']);
+
+        if ($this->hasActiveJob($member, $emailType)) {
+            return null;
+        }
+
+        $draft = $member->draft;
+        $contact = $member->contact;
+
+        if (! $draft || ! $contact || ! $contact->email) {
+            return null;
+        }
+
+        $body = $emailType === OutboundEmailJob::TYPE_FOLLOW_UP_2
+            ? $draft->follow_up_2
+            : $draft->follow_up_1;
+
+        if (empty($body)) {
+            return null;
+        }
+
+        return OutboundEmailJob::create([
+            'campaign_member_id' => $member->id,
+            'campaign_id' => $member->campaign_id,
+            'prospect_id' => $member->prospect_id,
+            'prospect_contact_id' => $member->prospect_contact_id,
+            'outreach_draft_id' => $member->outreach_draft_id,
+            'email_type' => $emailType,
+            'sequence_mode' => $member->sequence_mode,
+            'to_email' => strtolower($contact->email),
+            'to_name' => $contact->name,
+            'subject' => 'Re: '.($draft->subject ?: '(no subject)'),
+            'preheader' => $draft->preheader,
+            'body' => $body,
+            'status' => OutboundEmailJob::STATUS_QUEUED,
+            'scheduled_at' => $scheduledAt,
+            'meta' => [
+                'created_by' => 'controlled_sending_v1_followup',
+            ],
+        ]);
+    }
+    
     public function cancelJob(OutboundEmailJob $job, ?string $reason = null): OutboundEmailJob
     {
         if (! in_array($job->status, [

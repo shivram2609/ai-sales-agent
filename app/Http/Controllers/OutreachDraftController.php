@@ -167,6 +167,7 @@ class OutreachDraftController extends Controller
 			'status' => 'manually_edited',
 
 			'ai_quality_score' => null,
+			'ai_verdict' => null,
 			'ai_personalization_score' => null,
 			'ai_relevance_score' => null,
 			'ai_proof_score' => null,

@@ -137,8 +137,13 @@ class ProspectController extends Controller
 	}
     
 	public function generateDraft(Prospect $prospect, DraftGeneratorService $service) { 
-	
-		$service->generate($prospect); 
+
+		$contact = $prospect->contacts()
+			->where('status', \App\Models\ProspectContact::STATUS_ACTIVE)
+			->orderByDesc('is_primary')
+			->first();
+
+		$service->generate($prospect, $contact);
 		return back()->with('success', 'Draft generated.'); 
 	}
 	

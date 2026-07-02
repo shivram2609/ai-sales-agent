@@ -291,6 +291,14 @@ Subject: {{ $draft->subject }}
                 </div>
 
                 <div class="card-body">
+                    @if($draft->ai_verdict)
+                        <div class="mb-3">
+                            <span class="status-badge {{ $draft->ai_verdict }}">
+                                {{ str_replace('_', ' ', $draft->ai_verdict) }}
+                            </span>
+                        </div>
+                    @endif
+
                     @if($draft->ai_quality_score !== null)
                         <div class="ai-score-grid mb-3">
                             <div>

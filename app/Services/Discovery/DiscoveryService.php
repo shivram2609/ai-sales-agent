@@ -6,6 +6,7 @@ use App\Models\DiscoveryCampaign;
 use App\Models\DiscoveryResult;
 use App\Models\Prospect;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class DiscoveryService

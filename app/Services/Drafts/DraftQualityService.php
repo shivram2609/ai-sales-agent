@@ -33,6 +33,16 @@ class DraftQualityService
 
         $risk = ($fake || $misleading) ? 'high' : ((!$hasOptOut || $tooManyLinks || $tooLong || $tooSalesy) ? 'medium' : 'low');
 
+        // Same verdict vocabulary as Services\AI\DraftQualityService so both
+        // checkers write to a field that means the same thing regardless of
+        // which one ran.
+        $verdict = match (true) {
+            $fake || $misleading => 'do_not_send',
+            $risk === 'medium' && count($fixes) >= 2 => 'needs_major_rewrite',
+            $risk === 'medium' => 'needs_minor_edit',
+            default => 'sendable',
+        };
+
         $check = DraftQualityCheck::create([
             'outreach_draft_id' => $draft->id,
             'has_fake_personalization' => (bool) $fake,
@@ -45,7 +55,10 @@ class DraftQualityService
             'fixes_required' => $fixes,
         ]);
 
-        $draft->update(['status' => $risk === 'high' ? 'needs_revision' : 'quality_checked']);
+        $draft->update([
+            'status' => $risk === 'high' ? 'needs_revision' : 'quality_checked',
+            'ai_verdict' => $verdict,
+        ]);
         AgentLog::create(['prospect_id' => $draft->prospect_id, 'step_name' => 'draft_quality_guardrail_v1', 'input' => ['draft_id' => $draft->id, 'word_count' => $wordCount, 'link_count' => $linkCount], 'output' => ['risk_level' => $risk, 'fixes_required' => $fixes]]);
         return $check;
     }

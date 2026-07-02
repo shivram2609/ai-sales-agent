@@ -17,6 +17,7 @@ class OutreachDraft extends Model
         'follow_up_2',
         'status',
 
+        'ai_verdict',
         'ai_quality_score',
         'ai_personalization_score',
         'ai_relevance_score',

@@ -198,6 +198,15 @@
                             <div class="fw-semibold">{{ $draft->status ?? 'draft' }}</div>
                         </div>
 
+                        @if($draft->ai_verdict)
+                            <div class="mb-3">
+                                <div class="small text-muted">Verdict</div>
+                                <span class="status-badge {{ $draft->ai_verdict }}">
+                                    {{ str_replace('_', ' ', $draft->ai_verdict) }}
+                                </span>
+                            </div>
+                        @endif
+
                         @if($draft->ai_quality_score !== null)
                             <div class="mb-3">
                                 <div class="small text-muted">Previous AI Quality</div>
