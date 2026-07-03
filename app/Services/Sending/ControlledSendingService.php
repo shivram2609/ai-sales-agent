@@ -127,7 +127,7 @@ class ControlledSendingService
             ],
         ]);
     }
-    
+
     public function cancelJob(OutboundEmailJob $job, ?string $reason = null): OutboundEmailJob
     {
         if (! in_array($job->status, [

@@ -2,14 +2,13 @@
 
 namespace App\Console\Commands;
 
-use App\Mail\OutreachMail;
 use App\Models\CampaignMember;
 use App\Models\OutboundEmailJob;
+use App\Services\Email\BrevoEmailService;
 use App\Services\Sending\ControlledSendingService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 use Throwable;
 
 class ProcessOutboundEmailQueue extends Command
@@ -18,7 +17,7 @@ class ProcessOutboundEmailQueue extends Command
 
     protected $description = 'Send due, queued outbound emails and schedule the next step in the sequence.';
 
-    public function handle(ControlledSendingService $sendingService): int
+    public function handle(ControlledSendingService $sendingService, BrevoEmailService $brevo): int
     {
         $limit = (int) config('sending.max_per_run', 25);
 
@@ -35,13 +34,13 @@ class ProcessOutboundEmailQueue extends Command
         }
 
         foreach ($jobs as $job) {
-            $this->processJob($job, $sendingService);
+            $this->processJob($job, $sendingService, $brevo);
         }
 
         return self::SUCCESS;
     }
 
-    private function processJob(OutboundEmailJob $job, ControlledSendingService $sendingService): void
+    private function processJob(OutboundEmailJob $job, ControlledSendingService $sendingService, BrevoEmailService $brevo): void
     {
         // Re-check status under a lock in case something else (e.g. a manual
         // "cancel" click) touched this job between the query above and now.
@@ -72,12 +71,22 @@ class ProcessOutboundEmailQueue extends Command
         }
 
         try {
-            Mail::send(new OutreachMail($locked));
+            $htmlContent = nl2br(e($locked->body));
+
+            $result = $brevo->sendTransactionalEmail(
+                toEmail: $locked->to_email,
+                subject: $locked->subject ?: '(no subject)',
+                htmlContent: $htmlContent,
+                textContent: $locked->body,
+                tags: ['ai-sales-agent', $locked->email_type],
+                toName: $locked->to_name
+            );
 
             $locked->update([
                 'status' => OutboundEmailJob::STATUS_SENT,
                 'sent_at' => now(),
-                'provider' => config('mail.default'),
+                'provider' => 'brevo',
+                'provider_message_id' => $result['messageId'] ?? null,
             ]);
 
             if ($member) {

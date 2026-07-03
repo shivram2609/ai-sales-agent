@@ -10,6 +10,8 @@ return [
     'brevo' => [
         'key' => env('BREVO_API_KEY'),
         'webhook_secret' => env('BREVO_WEBHOOK_SECRET'),
+        'sender_email' => env('BREVO_SENDER_EMAIL'),
+        'sender_name' => env('BREVO_SENDER_NAME', 'Zestminds'),
     ],
 	
 	'openai' => [
