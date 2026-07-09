@@ -51,5 +51,13 @@
     <div class="sidebar-footer">
         <strong>Rule:</strong><br>
         AI prepares. Human approves. No auto-spam.
+        <hr class="my-2">
+        <div class="d-flex justify-content-between align-items-center">
+            <span class="small text-muted">{{ auth()->user()->name ?? '' }}</span>
+            <form method="POST" action="{{ route('logout') }}" class="m-0">
+                @csrf
+                <button type="submit" class="btn btn-link btn-sm p-0">Logout</button>
+            </form>
+        </div>
     </div>
 </aside>
