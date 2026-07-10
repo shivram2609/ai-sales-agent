@@ -5,42 +5,59 @@ namespace App\Console\Commands;
 use App\Models\CampaignMember;
 use App\Models\OutboundEmailJob;
 use App\Services\Email\BrevoEmailService;
+use App\Services\Email\SenderRotationService;
 use App\Services\Sending\ControlledSendingService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class ProcessOutboundEmailQueue extends Command
 {
+    private const NEXT_ALLOWED_CACHE_KEY = 'sending:next_allowed_at';
+
     protected $signature = 'sending:process-queue';
 
-    protected $description = 'Send due, queued outbound emails and schedule the next step in the sequence.';
+    protected $description = 'Send at most one due, queued outbound email per run, respecting a randomized gap between sends, then schedule the next sequence step.';
 
-    public function handle(ControlledSendingService $sendingService, BrevoEmailService $brevo): int
+    public function handle(ControlledSendingService $sendingService, BrevoEmailService $brevo, SenderRotationService $rotator): int
     {
-        $limit = (int) config('sending.max_per_run', 25);
+        $nextAllowedAt = Cache::get(self::NEXT_ALLOWED_CACHE_KEY);
 
-        $jobs = OutboundEmailJob::query()
+        if ($nextAllowedAt && now()->lt(\Carbon\Carbon::parse($nextAllowedAt))) {
+            $this->info("Waiting until {$nextAllowedAt} before the next send. Skipping this run.");
+            return self::SUCCESS;
+        }
+
+        // Only ever take the SINGLE earliest due job per run, never a batch.
+        // This is what enforces the gap - even if 20 emails are due at once,
+        // only one goes out per run, and the next run won't send again until
+        // the gap has passed.
+        $job = OutboundEmailJob::query()
             ->where('status', OutboundEmailJob::STATUS_QUEUED)
             ->where('scheduled_at', '<=', now())
             ->orderBy('scheduled_at')
-            ->limit($limit)
-            ->get();
+            ->first();
 
-        if ($jobs->isEmpty()) {
+        if (! $job) {
             $this->info('No due emails to send.');
             return self::SUCCESS;
         }
 
-        foreach ($jobs as $job) {
-            $this->processJob($job, $sendingService, $brevo);
+        $sent = $this->processJob($job, $sendingService, $brevo, $rotator);
+
+        if ($sent) {
+            $min = (int) config('sending.min_gap_seconds', 120);
+            $max = (int) config('sending.max_gap_seconds', 180);
+            $gapSeconds = random_int(min($min, $max), max($min, $max));
+            Cache::forever(self::NEXT_ALLOWED_CACHE_KEY, now()->addSeconds($gapSeconds)->toDateTimeString());
         }
 
         return self::SUCCESS;
     }
 
-    private function processJob(OutboundEmailJob $job, ControlledSendingService $sendingService, BrevoEmailService $brevo): void
+    private function processJob(OutboundEmailJob $job, ControlledSendingService $sendingService, BrevoEmailService $brevo, SenderRotationService $rotator): bool
     {
         // Re-check status under a lock in case something else (e.g. a manual
         // "cancel" click) touched this job between the query above and now.
@@ -56,7 +73,7 @@ class ProcessOutboundEmailQueue extends Command
         });
 
         if (! $locked) {
-            return;
+            return false;
         }
 
         $member = CampaignMember::find($locked->campaign_member_id);
@@ -67,8 +84,10 @@ class ProcessOutboundEmailQueue extends Command
         // jobs, so this mainly guards the "paused" case).
         if ($member && $member->status === CampaignMember::STATUS_PAUSED) {
             $locked->update(['status' => OutboundEmailJob::STATUS_QUEUED]);
-            return;
+            return false;
         }
+
+        $sender = $rotator->next();
 
         try {
             $htmlContent = nl2br(e($locked->body));
@@ -79,7 +98,9 @@ class ProcessOutboundEmailQueue extends Command
                 htmlContent: $htmlContent,
                 textContent: $locked->body,
                 tags: ['ai-sales-agent', $locked->email_type],
-                toName: $locked->to_name
+                toName: $locked->to_name,
+                fromEmail: $sender['email'] ?? null,
+                fromName: $sender['name'] ?? null
             );
 
             $locked->update([
@@ -87,13 +108,19 @@ class ProcessOutboundEmailQueue extends Command
                 'sent_at' => now(),
                 'provider' => 'brevo',
                 'provider_message_id' => $result['messageId'] ?? null,
+                'meta' => array_merge($locked->meta ?? [], [
+                    'sent_from_email' => $sender['email'] ?? null,
+                    'sent_from_name' => $sender['name'] ?? null,
+                ]),
             ]);
 
             if ($member) {
                 $this->advanceSequence($member, $locked, $sendingService);
             }
 
-            $this->info("Sent job #{$locked->id} ({$locked->email_type}) to {$locked->to_email}");
+            $this->info("Sent job #{$locked->id} ({$locked->email_type}) to {$locked->to_email} from {$sender['email']}");
+
+            return true;
         } catch (Throwable $e) {
             $locked->update([
                 'status' => OutboundEmailJob::STATUS_FAILED,
@@ -107,6 +134,10 @@ class ProcessOutboundEmailQueue extends Command
             ]);
 
             $this->error("Failed job #{$locked->id}: {$e->getMessage()}");
+
+            // Still counts as an attempt for gap-timing purposes, so a
+            // failing job can't be retried instantly in a tight loop.
+            return true;
         }
     }
 

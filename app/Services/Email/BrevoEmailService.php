@@ -15,11 +15,13 @@ class BrevoEmailService
         string $htmlContent,
         ?string $textContent = null,
         array $tags = [],
-        ?string $toName = null
+        ?string $toName = null,
+        ?string $fromEmail = null,
+        ?string $fromName = null
     ): array {
         $apiKey = (string) config('services.brevo.key');
-        $senderEmail = (string) config('services.brevo.sender_email');
-        $senderName = (string) config('services.brevo.sender_name', 'Zestminds');
+        $senderEmail = $fromEmail ?: (string) config('services.brevo.sender_email');
+        $senderName = $fromName ?: (string) config('services.brevo.sender_name', 'Zestminds');
 
         if (! $apiKey) {
             throw new RuntimeException('Brevo API key is not configured.');
